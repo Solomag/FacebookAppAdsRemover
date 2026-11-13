@@ -20,8 +20,10 @@ internal object ExternalBrowserPolicy {
         var target = webUri(url) ?: return null
         // Decode only known link shims, never a random Facebook page's query.
         repeat(4) {
-            if (internalHost(target.host) &&
-                (target.path == "/l.php" || target.path == "/flx/warn/")) {
+            // /flx/warn/ is Facebook's suspicious-link interstitial: keep it
+            // in Facebook's browser so the user still sees the warning.
+            if (internalHost(target.host) && target.path == "/flx/warn/") return null
+            if (internalHost(target.host) && target.path == "/l.php") {
                 target = webUri(queryParameter(target, "u")) ?: return null
             }
         }

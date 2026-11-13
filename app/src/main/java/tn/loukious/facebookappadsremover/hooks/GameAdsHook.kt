@@ -920,9 +920,22 @@ object GameAdsHook {
     private fun injectGameAdHidingScript(webView: WebView) {
         webView.post {
             runCatching {
+                // The sweep hides iframes/"ad"-looking elements by heuristics,
+                // so it must only ever run inside an Instant Game — never in
+                // the in-app browser on arbitrary third-party sites — and
+                // only while the game-ads toggle is on.
+                if (!enabled() || !isInstantGameUrl(webView.url)) return@runCatching
                 webView.evaluateJavascript(GAME_AD_WEBVIEW_HIDE_SCRIPT, null)
             }
         }
+    }
+
+    /** Instant Games are served from per-app *.apps.fbsbx.com origins over https. */
+    internal fun isInstantGameUrl(url: String?): Boolean {
+        val uri = runCatching { java.net.URI(url ?: return false) }.getOrNull() ?: return false
+        if (!uri.scheme.equals("https", ignoreCase = true)) return false
+        val host = uri.host?.lowercase(java.util.Locale.ROOT)?.trimEnd('.') ?: return false
+        return host == "fbsbx.com" || host.endsWith(".fbsbx.com")
     }
 
     /** Audience Network native ad view by stable class-name shape. */
@@ -2355,6 +2368,7 @@ object GameAdsHook {
     private object AddViewWatcher : Hooker {
         override fun intercept(chain: XposedInterface.Chain): Any? {
             val result = chain.proceed()
+            if (!enabled()) return result
             runCatching {
                 val child = chain.args.firstOrNull { it is View } as? View ?: return@runCatching
                 if (isPotentialNativeGameAdView(child)) {
@@ -2372,6 +2386,7 @@ object GameAdsHook {
     private object WebViewLifecycleWatcher : Hooker {
         override fun intercept(chain: XposedInterface.Chain): Any? {
             val result = chain.proceed()
+            if (!enabled()) return result
             runCatching {
                 val webView = chain.thisObject as? WebView ?: return@runCatching
                 injectGameAdHidingScript(webView)

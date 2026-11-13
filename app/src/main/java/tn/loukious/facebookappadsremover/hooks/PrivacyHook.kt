@@ -112,7 +112,7 @@ object PrivacyHook {
             for (m in fo.declaredMethods) {
                 if (Modifier.isAbstract(m.modifiers)) continue
                 if (m.name == "startWatching" || m.name == "onEvent") {
-                    module.hook(m).intercept(BlockHooker)
+                    module.hook(m).intercept(ScreenshotObserverBlocker)
                     armed++
                 }
             }
@@ -138,11 +138,51 @@ object PrivacyHook {
         return detectionInstalled
     }
 
-    /** Skips the original call — the mod's hooks gated then returned early. */
+    /**
+     * Skips the original call — the mod's hooks gated then returned early.
+     * Primitive-returning targets get a neutral value instead of null:
+     * ScreenRecordingCallbacks.addCallback returns the current recording
+     * state (int), and 0 is SCREEN_RECORDING_STATE_NOT_VISIBLE.
+     */
     private object BlockHooker : Hooker {
+        override fun intercept(chain: XposedInterface.Chain): Any? =
+            when ((chain.executable as? java.lang.reflect.Method)?.returnType) {
+                Int::class.javaPrimitiveType -> 0
+                Boolean::class.javaPrimitiveType -> false
+                Long::class.javaPrimitiveType -> 0L
+                else -> null
+            }
+    }
+
+    /**
+     * Only starves observers that watch a screenshots directory. Facebook
+     * uses FileObserver for other things too; blocking every observer in the
+     * process silently breaks those.
+     */
+    private object ScreenshotObserverBlocker : Hooker {
         override fun intercept(chain: XposedInterface.Chain): Any? {
-            // no chain.proceed(): the observed call is swallowed
-            return null
+            val observer = chain.thisObject ?: return chain.proceed()
+            return if (watchesScreenshots(observer)) null else chain.proceed()
         }
+
+        private fun watchesScreenshots(observer: Any): Boolean = runCatching {
+            var cls: Class<*>? = observer.javaClass
+            while (cls != null && cls != Any::class.java) {
+                for (f in cls.declaredFields) {
+                    if (Modifier.isStatic(f.modifiers)) continue
+                    val paths: List<String> = when (f.type) {
+                        String::class.java, java.io.File::class.java ->
+                            listOfNotNull(f.apply { isAccessible = true }.get(observer)?.toString())
+                        List::class.java ->
+                            (f.apply { isAccessible = true }.get(observer) as? List<*>)
+                                ?.mapNotNull { it?.toString() }.orEmpty()
+                        else -> emptyList()
+                    }
+                    if (paths.any { it.contains("screenshot", ignoreCase = true) }) return@runCatching true
+                }
+                cls = cls.superclass
+            }
+            false
+        }.getOrDefault(false)
     }
 }

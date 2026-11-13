@@ -31,9 +31,12 @@ class ExternalBrowserPolicyTest {
         assertEquals(url, destination(shim(shim(url))))
     }
 
-    @Test fun warningInterstitialUsesItsWebDestination() {
-        assertEquals("https://example.org/", destination(
+    @Test fun warningInterstitialStaysInFacebook() {
+        // Facebook's suspicious-link warning must still be shown.
+        assertNull(destination(
             "https://www.facebook.com/flx/warn/?u=https%3A%2F%2Fexample.org%2F"))
+        assertNull(destination(shim(
+            "https://www.facebook.com/flx/warn/?u=https%3A%2F%2Fexample.org%2F")))
     }
 
     @Test fun internalPagesAndAuthenticationStayInFacebook() {

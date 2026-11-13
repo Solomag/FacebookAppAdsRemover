@@ -106,7 +106,7 @@ object StoryFeedViewerHook {
                 logged = true
                 L.i(TAG, "story viewer render blocked: ${chain.executable.name}")
             }
-            return null
+            return AdFilterHook.nullResult(chain.executable as? java.lang.reflect.Method)
         }
     }
 

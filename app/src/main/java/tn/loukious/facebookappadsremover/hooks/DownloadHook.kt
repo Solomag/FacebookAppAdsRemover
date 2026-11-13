@@ -210,7 +210,23 @@ object DownloadHook {
     private val dlIo: ExecutorService = Executors.newSingleThreadExecutor()
 
     /** One connection pool/dispatcher for every request; call sites derive per-use timeouts via newBuilder(). */
-    private val baseHttp: okhttp3.OkHttpClient by lazy { okhttp3.OkHttpClient() }
+    private val baseHttp: okhttp3.OkHttpClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            // A Facebook URL can redirect off-site; OkHttp keeps manually set
+            // headers on redirects, so drop the session cookie on every hop
+            // that isn't an https Facebook host.
+            .addNetworkInterceptor { chain ->
+                val request = chain.request()
+                if (request.header("Cookie") != null &&
+                    !isFacebookSessionHost(request.url.toString())
+                ) {
+                    chain.proceed(request.newBuilder().removeHeader("Cookie").build())
+                } else {
+                    chain.proceed(request)
+                }
+            }
+            .build()
+    }
 
     /**
      * Decoded card thumbnails, keyed by album-art URL or "frame:<videoId>".
@@ -1553,11 +1569,24 @@ object DownloadHook {
         val extras: List<Quality>,
     )
 
-    /** Cookie for the page fetch (mod prefs FBHTTPCOOKIE/loginCookie). */
-    private fun sessionCookie(): String? =
-        appContext.getSharedPreferences("fbar_account", Context.MODE_PRIVATE)
+    /**
+     * Cookie for the page fetch (mod prefs FBHTTPCOOKIE/loginCookie) — only
+     * for https Facebook hosts. The URL can be anything the user copied, and
+     * the cookie is the full login session.
+     */
+    private fun sessionCookie(url: String): String? {
+        if (!isFacebookSessionHost(url)) return null
+        return appContext.getSharedPreferences("fbar_account", Context.MODE_PRIVATE)
             .getString(tn.loukious.facebookappadsremover.hooks.AccountHook.KEY_COOKIE_HTTP, null)
             ?.takeIf { it.isNotBlank() }
+    }
+
+    internal fun isFacebookSessionHost(url: String?): Boolean {
+        val uri = runCatching { java.net.URI(url ?: return false) }.getOrNull() ?: return false
+        if (!uri.scheme.equals("https", ignoreCase = true)) return false
+        val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.') ?: return false
+        return host == "facebook.com" || host.endsWith(".facebook.com")
+    }
 
     /**
      * E1s6$bsrnc.run() port: GET the page with desktop headers, persist the
@@ -1573,7 +1602,7 @@ object DownloadHook {
             .header("User-Agent", DESKTOP_UA)
             .header("Accept", DESKTOP_ACCEPT)
             .header("sec-fetch-mode", "navigate")
-        sessionCookie()?.let { builder.header("Cookie", it) }
+        sessionCookie(pageUrl)?.let { builder.header("Cookie", it) }
         client.newCall(builder.build()).execute().use { resp ->
             if (!resp.isSuccessful) {
                 L.w(TAG, "FacebookExtract HTTP ${resp.code} for $pageUrl")
@@ -1933,7 +1962,7 @@ object DownloadHook {
                 .header("User-Agent",
                     "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
                 .header("Range", "bytes=0-${4 * 1024 * 1024 - 1}")
-            sessionCookie()?.let { builder.header("Cookie", it) }
+            sessionCookie(url)?.let { builder.header("Cookie", it) }
             client.newCall(builder.build()).execute().use { resp ->
                 if (!resp.isSuccessful) error("HTTP ${resp.code}")
                 val input = resp.body?.byteStream() ?: error("empty body")

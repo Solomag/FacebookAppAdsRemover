@@ -343,6 +343,8 @@ object NewsfeedFilterHook {
     private data class HiddenRowState(
         val height: Int,
         val visibility: Int,
+        /** Adapter position when hidden; a different one means the view now shows another item. */
+        val position: Int,
     )
 
     private object AiUiFallbackHook : Hooker {
@@ -393,7 +395,15 @@ object NewsfeedFilterHook {
             var matched = 0
             for (i in 0 until recycler.childCount) {
                 val row = recycler.getChildAt(i)
-                if (enabled && hiddenRows.containsKey(row)) continue
+                val hidden = hiddenRows[row]
+                if (enabled && hidden != null) {
+                    // A row can be rebound to another item without being
+                    // detached (data-set changes, inserts above it). Keep it
+                    // hidden only while it still shows the same position.
+                    if (hidden.position == adapterPosition(recycler, row)) continue
+                    restoreRow(row)
+                    continue // re-evaluated on the next scan once visible again
+                }
                 if (enabled && containsAiDisclosure(row, scan)) {
                     matched++
                     hideRow(row)
@@ -558,7 +568,8 @@ object NewsfeedFilterHook {
         private fun hideRow(row: View) {
             if (hiddenRows.containsKey(row)) return
             val lp = row.layoutParams ?: return
-            hiddenRows[row] = HiddenRowState(lp.height, row.visibility)
+            val position = (row.parent as? ViewGroup)?.let { adapterPosition(it, row) } ?: NO_POSITION
+            hiddenRows[row] = HiddenRowState(lp.height, row.visibility, position)
             row.addOnAttachStateChangeListener(detachRestore)
             lp.height = 0
             row.layoutParams = lp
@@ -566,6 +577,14 @@ object NewsfeedFilterHook {
             row.requestLayout()
             L.i(TAG, "UI fallback hid AI-content feed row")
         }
+
+        private const val NO_POSITION = -1
+
+        /** RecyclerView.getChildAdapterPosition(View), resolved reflectively. */
+        private fun adapterPosition(recycler: ViewGroup, row: View): Int = runCatching {
+            recycler.javaClass.getMethod("getChildAdapterPosition", View::class.java)
+                .invoke(recycler, row) as Int
+        }.getOrDefault(NO_POSITION)
 
         private fun restoreRow(row: View) {
             val state = hiddenRows.remove(row) ?: return

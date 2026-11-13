@@ -384,7 +384,7 @@ object AdFilterHook {
     }
 
     /** Returning null from a primitive-returning method crashes; substitute defaults. */
-    private fun nullResult(m: Method?): Any? {
+    internal fun nullResult(m: Method?): Any? {
         return when (m?.returnType) {
             java.lang.Boolean.TYPE -> java.lang.Boolean.FALSE
             java.lang.Integer.TYPE -> 0

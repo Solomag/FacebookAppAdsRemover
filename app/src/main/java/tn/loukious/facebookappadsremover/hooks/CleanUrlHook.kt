@@ -112,6 +112,11 @@ object CleanUrlHook {
         val match = LPHP_PATTERN.matchEntire(url) ?: return
         val unwrapped = URLDecoder.decode(match.groupValues[1], "utf-8")
         if (unwrapped.isEmpty()) return
+        // Only ever swap in a plain web link: the shim is what normally
+        // vets the destination, so never hand intent:/javascript:/custom
+        // schemes straight to the activity.
+        val scheme = Uri.parse(unwrapped).scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") return
         intent.data = Uri.parse(unwrapped)
         L.i(TAG, "l.php unwrapped:\n  from: $url\n  to:   $unwrapped")
     }

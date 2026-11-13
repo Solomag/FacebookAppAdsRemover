@@ -983,8 +983,11 @@ object FeedGuardHook {
         if (result == null) return null
         if (result is Iterable<*>) return result
         return runCatching {
+            // Same selection as rebuildFeedResult: the list that gets filtered
+            // must be the one that gets replaced.
             val field = result.javaClass.declaredFields.firstOrNull { candidate ->
-                Iterable::class.java.isAssignableFrom(candidate.type)
+                !Modifier.isStatic(candidate.modifiers) &&
+                    Iterable::class.java.isAssignableFrom(candidate.type)
             } ?: return null
             field.isAccessible = true
             field.get(result) as? Iterable<*>
@@ -1019,18 +1022,22 @@ object FeedGuardHook {
         val originalList = runCatching { listField.get(result) }.getOrNull()
         val rebuiltList = buildImmutableListLike(originalList, items) ?: return null
         val stats = runCatching { intArrayField.get(result) as? IntArray }.getOrNull()?.clone() ?: return null
-        val ints = intFields.map { field -> runCatching { field.getInt(result) }.getOrNull() ?: return null }
 
-        val constructor = type.declaredConstructors.firstOrNull { constructor ->
+        type.declaredConstructors.firstOrNull { constructor ->
             constructor.parameterCount == 5 &&
                 constructor.parameterTypes.getOrNull(0)?.name == IMMUTABLE_LIST_CLASS &&
                 constructor.parameterTypes.getOrNull(1) == IntArray::class.java &&
                 constructor.parameterTypes.drop(2).all { it == Int::class.javaPrimitiveType }
         } ?: return null
 
-        constructor.isAccessible = true
+        // Swap the list on the freshly returned result instead of calling the
+        // 5-arg constructor: getDeclaredFields() order is unspecified, so
+        // passing the three ints positionally could swap them. The ints stay
+        // untouched; the stats array is replaced by a private copy.
         return runCatching {
-            constructor.newInstance(rebuiltList, stats, ints[0], ints[1], ints[2])
+            listField.set(result, rebuiltList)
+            intArrayField.set(result, stats)
+            result
         }.getOrNull()
     }
 

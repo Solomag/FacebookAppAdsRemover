@@ -106,7 +106,7 @@ object HideSeenStoryHook {
                 logged = true
                 L.i(TAG, "story viewer setup blocked: ${chain.executable.name}")
             }
-            return null
+            return AdFilterHook.nullResult(chain.executable as? java.lang.reflect.Method)
         }
     }
 

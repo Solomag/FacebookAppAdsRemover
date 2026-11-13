@@ -112,7 +112,7 @@ object StoriesTrayHook {
                 return chain.proceed()
             }
             L.i(TAG, "HIDE stories tray adapter (mod: hideTagStory)")
-            return null
+            return AdFilterHook.nullResult(chain.executable as? java.lang.reflect.Method)
         }
     }
 }

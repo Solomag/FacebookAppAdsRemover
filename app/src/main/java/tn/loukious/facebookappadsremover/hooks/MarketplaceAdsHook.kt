@@ -449,7 +449,7 @@ object MarketplaceAdsHook {
                 logged++
                 L.i(TAG, "render block fired: ${chain.executable.name}")
             }
-            return null
+            return AdFilterHook.nullResult(chain.executable as? java.lang.reflect.Method)
         }
     }
 
